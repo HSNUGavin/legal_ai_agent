@@ -5,13 +5,14 @@ import pandas as pd
 import sqlite3
 from config import OPENAI_API_KEY, MODEL_NAME, HISTORY_FILE, FILES_DIR
 from datetime import datetime
+import re
 
 class Agent:
     def __init__(self):
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.cycle_count = 0
         self.conversation_history = []
-        self.load_history()
+        # 不再自動載入歷史，而是在需要時載入
         self.setup_database()
         self.available_tables = self.get_available_tables()
         self.show_prompt = True  # 是否顯示 prompt
@@ -19,24 +20,27 @@ class Agent:
     def setup_database(self):
         """初始化 SQLite 數據庫並導入 CSV 文件"""
         self.db_path = os.path.join(FILES_DIR, 'data.db')
-        self.conn = sqlite3.connect(self.db_path)
+        # 不在初始化時創建連接，而是在需要時創建
         
         # 自動導入所有 CSV 文件到 SQLite
+        conn = sqlite3.connect(self.db_path)
         for file in os.listdir(FILES_DIR):
             if file.endswith('.csv'):
                 table_name = os.path.splitext(file)[0]
                 df = pd.read_csv(os.path.join(FILES_DIR, file))
-                df.to_sql(table_name, self.conn, if_exists='replace', index=False)
+                df.to_sql(table_name, conn, if_exists='replace', index=False)
                 print(f"已導入表格: {table_name}")
                 # 顯示表格結構
-                cursor = self.conn.cursor()
+                cursor = conn.cursor()
                 cursor.execute(f"PRAGMA table_info({table_name})")
                 columns = cursor.fetchall()
                 print("列名:", [col[1] for col in columns])
+        conn.close()
 
     def get_available_tables(self):
         """獲取數據庫中所有可用的表及其結構"""
-        cursor = self.conn.cursor()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         tables = {}
         
         # 獲取所有表名
@@ -49,6 +53,7 @@ class Agent:
             columns = cursor.fetchall()
             tables[table_name] = [col[1] for col in columns]
         
+        conn.close()
         return tables
 
     def execute_sql(self, sql):
@@ -58,7 +63,9 @@ class Agent:
             sql = sql.replace('{', '').replace('}', '')
             
             # 執行查詢
-            df = pd.read_sql_query(sql, self.conn)
+            conn = sqlite3.connect(self.db_path)
+            df = pd.read_sql_query(sql, conn)
+            conn.close()
             
             # 限制回傳的資料量
             max_rows = 5  # 最多顯示 5 行
@@ -87,7 +94,12 @@ class Agent:
             return f"SQL 查詢結果 ({len(df)} 行):\n{result}"
             
         except Exception as e:
-            available_tables = "\n".join([f"- {table}: {columns}" for table, columns in self.available_tables.items()])
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            table_names = cursor.fetchall()
+            available_tables = "\n".join([f"- {table_name[0]}: " + ', '.join([col[1] for col in cursor.execute(f"PRAGMA table_info({table_name[0]})").fetchall()]) for table_name in table_names])
+            conn.close()
             return f"SQL 執行錯誤: {str(e)}\n\n可用的表格和列：\n{available_tables}"
 
     def save_history(self):
@@ -157,6 +169,9 @@ class Agent:
     def think(self, user_input):
         self.cycle_count += 1
         
+        print(f"\n=== Agent.think() 被調用，循環 #{self.cycle_count} ===")
+        print(f"用戶輸入: {user_input[:100]}...")
+        
         # 準備系統提示
         system_prompt = f"""你是一個可以閱讀本地文件和執行 SQL 查詢的法律案例分析專家。請你根據用戶的問題主動查詢相關案例分析回答
 當前是第 {self.cycle_count} 次循環，你正在與自己對話進行法律分析
@@ -164,6 +179,7 @@ class Agent:
 可用的資料表說明：
 1. judgement_guilty_analysis_grouping_20250223_180510
    - 包含各爭點的有罪/無罪統計資料
+   - 重要欄位：defendant_behavior (被告行為，用來搜尋關鍵字), issue_type (爭點), guilty (有罪/無罪) 可用來統計爭點下有無罪的案件比率
    - 可用於了解整體趨勢和常見爭點
 
 2. judgement_raw_20250223_181106
@@ -196,14 +212,14 @@ SQL 查詢注意事項：
 7. 查詢結果總字數限制為 5000 字元
 
 請嚴格依照以下格式回應：
-<strategy>思考方向 十字內</strategy>
-<think>思考過程，包括對之前對話的理解和下一步計劃 三十字內 </think>
+<think>思考方向 五十字內 </think>
 <action>READ_FILE {{filename}} 或 SQL {{query}}</action>
 <if_finish>continue 或 finish</if_finish>
 <content>若完成則輸出針對用戶問題回答內容</content>
 若你認為分析完成了請使用 finish,沒有則輸入 continue
 若你決定 finish 請在 content 內總結到目前為止的發現與分析
 回應的時候請盡量引用你搜尋到的數據、具體案例與事實，增加可信度
+查到 3 個具體案例後請積極進行總結並 finish 對話
 若用戶的問題跟法律無關請 finish 對話
 """
 
@@ -246,6 +262,7 @@ SQL 查詢注意事項：
             print("\n=== Prompt 結束 ===\n")
         
         # 獲取 AI 回應
+        print("正在獲取 AI 回應...")
         response = self.client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
@@ -253,6 +270,20 @@ SQL 查詢注意事項：
         )
         
         ai_response = response.choices[0].message.content
+        print(f"AI 回應長度: {len(ai_response)}")
+        
+        # 檢查是否包含 finish 標籤
+        if '<if_finish>finish</if_finish>' in ai_response:
+            print("\n=== 檢測到 finish 標籤 ===")
+            content_match = re.search(r'<content>(.*?)</content>', ai_response, re.DOTALL)
+            if content_match:
+                content = content_match.group(1).strip()
+                print("\n=== AI 完整回應（agent.think 中檢測） ===")
+                print(content)
+                print("=== 回應結束 ===\n")
+            else:
+                print("未找到 content 標籤")
+        
         self.conversation_history.append(f"User: {user_input}\nAI: {ai_response}")
         self.save_history()
         
