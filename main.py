@@ -4,36 +4,39 @@ from agent import Agent
 
 def process_ai_response(agent, response, initial_input=None):
     """處理 AI 的回應，包括執行動作和處理結果"""
-    # 檢查 AI 的動作
-    if match := re.search(r'<action>READ_FILE (.*?)</action>', response):
-        filename = match.group(1)
-        print(f"\n讀取文件 {filename}:")
-        file_content = agent.read_file(filename)
-        print(file_content)
-        
-        # 讓 AI 處理文件內容
-        print(f"\n循環次數: {agent.cycle_count + 1}")
-        print("AI處理文件內容...")
-        return agent.think(f"我已經讀取了文件 {filename}，內容如下:\n{file_content}")
-    
-    elif match := re.search(r'<action>SQL (.*?)</action>', response):
-        sql = match.group(1)
-        print(f"\n執行 SQL: {sql}")
-        result = agent.execute_sql(sql)
-        print(result)
-        
-        # 讓 AI 處理 SQL 結果
-        print(f"\n循環次數: {agent.cycle_count + 1}")
-        print("AI處理 SQL 結果...")
-        return agent.think(f"SQL 查詢結果如下:\n{result}")
-    
-    # 檢查是否繼續
+    # 先檢查是否要結束
     if match := re.search(r'<if_finish>(.*?)</if_finish>', response):
         decision = match.group(1).strip().lower()
-        if decision == 'continue':
+        if decision == 'finish':
+            return response
+        elif decision == 'continue':
+            # 只有在確定要繼續時才檢查動作
+            if action_match := re.search(r'<action>(.*?)</action>', response):
+                action = action_match.group(1)
+                if action.startswith('READ_FILE '):
+                    filename = action[10:]  # 去掉 'READ_FILE ' 前綴
+                    print(f"\n讀取文件 {filename}:")
+                    file_content = agent.read_file(filename)
+                    print(file_content)
+                    
+                    print(f"\n循環次數: {agent.cycle_count + 1}")
+                    print("AI處理文件內容...")
+                    return agent.think(f"[SYSTEM] 我已經讀取了文件 {filename}，內容如下:\n{file_content}")
+                
+                elif action.startswith('SQL '):
+                    sql = action[4:]  # 去掉 'SQL ' 前綴
+                    print(f"\n執行 SQL: {sql}")
+                    result = agent.execute_sql(sql)
+                    print(result)
+                    
+                    print(f"\n循環次數: {agent.cycle_count + 1}")
+                    print("AI處理 SQL 結果...")
+                    return agent.think(f"[SYSTEM] SQL 查詢結果如下:\n{result}")
+            
+            # 如果沒有動作但要繼續，使用原始問題或通用提示
             print(f"\n循環次數: {agent.cycle_count + 1}")
             print("AI 繼續分析...")
-            next_input = initial_input if initial_input else "請繼續分析上述情況。"
+            next_input = f"[ORIGINAL_QUESTION] {initial_input}" if initial_input else "[SYSTEM] 請繼續分析上述情況。"
             return agent.think(next_input)
     
     return response

@@ -62,18 +62,27 @@ class Agent:
             
             # 限制回傳的資料量
             max_rows = 5  # 最多顯示 5 行
-            max_str_length = 100  # 每個欄位最多顯示 100 字元
+            max_column_length = 2000  # 每個欄位最多顯示 2000 字元
+            max_total_length = 5000  # 總字數限制
             
             if len(df) > max_rows:
                 df = df.head(max_rows)
-                result = df.to_string() + f"\n... (還有 {len(df) - max_rows} 行未顯示)"
-            else:
-                result = df.to_string()
             
-            # 截斷長字串
-            for col in df.columns:
-                if df[col].dtype == 'object':  # 只處理字串類型
-                    df[col] = df[col].apply(lambda x: str(x)[:max_str_length] + '...' if len(str(x)) > max_str_length else x)
+            # 處理每個欄位的字數限制
+            for column in df.columns:
+                if df[column].dtype == 'object':  # 只處理文字欄位
+                    df[column] = df[column].apply(lambda x: str(x)[:max_column_length] + '...' if len(str(x)) > max_column_length else x)
+            
+            # 轉換為字串
+            result = df.to_string()
+            
+            # 處理總字數限制
+            if len(result) > max_total_length:
+                result = result[:max_total_length] + f"\n... (超過 {max_total_length} 字元限制)"
+            
+            # 如果有更多行未顯示，添加提示
+            if len(df) > max_rows:
+                result += f"\n... (還有 {len(df) - max_rows} 行未顯示)"
             
             return f"SQL 查詢結果 ({len(df)} 行):\n{result}"
             
@@ -149,8 +158,8 @@ class Agent:
         self.cycle_count += 1
         
         # 準備系統提示
-        system_prompt = f"""你是一個可以閱讀本地文件和執行 SQL 查詢的AI助手。
-當前是第 {self.cycle_count} 次循環。
+        system_prompt = f"""你是一個可以閱讀本地文件和執行 SQL 查詢的法律案例分析專家。請你根據用戶的問題主動查詢相關案例分析回答
+當前是第 {self.cycle_count} 次循環，你正在與自己對話進行法律分析
 
 可用的資料表說明：
 1. judgement_guilty_analysis_grouping_20250223_180510
@@ -180,15 +189,23 @@ class Agent:
 SQL 查詢注意事項：
 1. 不要在 SQL 語句外加大括號
 2. 確保表名完全正確
-3. 使用 LIKE 查詢時用 '%關鍵字%'
-4. 每次查詢最多顯示 5 行資料
-5. 長文字欄位會自動截斷
+3. 可嘗試檢視資料表內範例資料了解資料
+4. 使用 LIKE 查詢時用 '%關鍵字%'
+5. 每次查詢最多顯示 5 行資料
+6. 單一欄位最多顯示 2000 字元
+7. 查詢結果總字數限制為 5000 字元
 
-請用以下格式回應：
-<think>思考過程，包括對之前對話的理解和下一步計劃</think>
+請嚴格依照以下格式回應：
+<strategy>思考方向 十字內</strategy>
+<think>思考過程，包括對之前對話的理解和下一步計劃 三十字內 </think>
 <action>READ_FILE {{filename}} 或 SQL {{query}}</action>
-<content>回應內容</content>
-<if_finish>continue 或 finish</if_finish>"""
+<if_finish>continue 或 finish</if_finish>
+<content>若完成則輸出針對用戶問題回答內容</content>
+若你認為分析完成了請使用 finish,沒有則輸入 continue
+若你決定 finish 請在 content 內總結到目前為止的發現與分析
+回應的時候請盡量引用你搜尋到的數據、具體案例與事實，增加可信度
+若用戶的問題跟法律無關請 finish 對話
+"""
 
         # 保存最後的系統提示
         self.last_system_prompt = system_prompt
