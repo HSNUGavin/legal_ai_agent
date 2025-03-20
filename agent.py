@@ -3,18 +3,98 @@ import json
 from openai import OpenAI
 import pandas as pd
 import sqlite3
-from config import OPENAI_API_KEY, MODEL_NAME, HISTORY_FILE, FILES_DIR
+from config import OPENAI_API_KEY, MODEL_NAME, HISTORY_DIR, HISTORY_FILE, FILES_DIR
 from datetime import datetime
+import uuid
 
 class Agent:
-    def __init__(self):
+    def __init__(self, conversation_id=None):
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.cycle_count = 0
         self.conversation_history = []
+        self.conversation_id = conversation_id or str(uuid.uuid4())
         self.load_history()
         self.setup_database()
         self.available_tables = self.get_available_tables()
-        self.show_prompt = True  # 是否顯示 prompt
+        self.show_prompt = True
+
+    def get_history_file(self):
+        """獲取特定對話的歷史文件路徑"""
+        return os.path.join(HISTORY_DIR, f"conversation_{self.conversation_id}.json")
+
+    def load_history(self):
+        """加載特定對話的歷史記錄"""
+        history_file = self.get_history_file()
+        if os.path.exists(history_file):
+            try:
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    history_data = []
+                    for line in f:
+                        if line.strip():  # 忽略空行
+                            try:
+                                entry = json.loads(line)
+                                if entry.get("conversation"):
+                                    history_data.append(entry["conversation"])
+                            except json.JSONDecodeError:
+                                continue
+                    if history_data:
+                        self.conversation_history = history_data[-1] if history_data else []
+                        self.cycle_count = history_data[-1].get("cycle_count", 0) if history_data else 0
+            except Exception as e:
+                print(f"加載歷史記錄時出錯: {e}")
+        else:
+            self.conversation_history = []
+            self.cycle_count = 0
+
+    def save_history(self):
+        """保存對話歷史，包含完整的系統提示和對話內容"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry = {
+            "timestamp": current_time,
+            "conversation_id": self.conversation_id,
+            "cycle_count": self.cycle_count,
+            "system_prompt": self.last_system_prompt if hasattr(self, 'last_system_prompt') else None,
+            "conversation": self.conversation_history[-1] if self.conversation_history else None,
+            "full_context": self.last_full_context if hasattr(self, 'last_full_context') else None
+        }
+        
+        # 保存到特定對話的文件
+        history_file = self.get_history_file()
+        with open(history_file, 'a', encoding='utf-8') as f:
+            json.dump(entry, f, ensure_ascii=False)
+            f.write("\n")
+        
+        # 同時保存到主歷史文件
+        with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
+            json.dump(entry, f, ensure_ascii=False)
+            f.write("\n")
+
+    @staticmethod
+    def list_conversations():
+        """列出所有可用的對話"""
+        history_dir = HISTORY_DIR
+        conversations = []
+        if os.path.exists(history_dir):
+            for file in os.listdir(history_dir):
+                if file.startswith("conversation_") and file.endswith(".json"):
+                    conv_id = file[12:-5]  # 移除 "conversation_" 和 ".json"
+                    try:
+                        with open(os.path.join(history_dir, file), 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if line.strip():
+                                    try:
+                                        entry = json.loads(line)
+                                        conversations.append({
+                                            "id": conv_id,
+                                            "last_update": entry["timestamp"],
+                                            "messages_count": len(entry.get("conversation", [])) if entry.get("conversation") else 0
+                                        })
+                                        break
+                                    except json.JSONDecodeError:
+                                        continue
+                    except Exception as e:
+                        print(f"讀取對話 {conv_id} 時出錯: {e}")
+        return conversations
 
     def setup_database(self):
         """初始化 SQLite 數據庫並導入 CSV 文件"""
@@ -62,62 +142,37 @@ class Agent:
             
             # 限制回傳的資料量
             max_rows = 5  # 最多顯示 5 行
-            max_str_length = 100  # 每個欄位最多顯示 100 字元
+            max_str_length = 500  # 每個欄位最多顯示 500 字元
+            max_total_length = 5000  # 整體輸出最大長度
             
             if len(df) > max_rows:
                 df = df.head(max_rows)
-                result = df.to_string() + f"\n... (還有 {len(df) - max_rows} 行未顯示)"
-            else:
-                result = df.to_string()
             
             # 截斷長字串
             for col in df.columns:
                 if df[col].dtype == 'object':  # 只處理字串類型
                     df[col] = df[col].apply(lambda x: str(x)[:max_str_length] + '...' if len(str(x)) > max_str_length else x)
             
+            # 轉換為字串並限制總長度
+            result = df.to_string()
+            if len(result) > max_total_length:
+                result = result[:max_total_length] + "..."
+            
             return f"SQL 查詢結果 ({len(df)} 行):\n{result}"
             
         except Exception as e:
-            available_tables = "\n".join([f"- {table}: {columns}" for table, columns in self.available_tables.items()])
-            return f"SQL 執行錯誤: {str(e)}\n\n可用的表格和列：\n{available_tables}"
-
-    def save_history(self):
-        """保存對話歷史，包含完整的系統提示和對話內容"""
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        entry = {
-            "timestamp": current_time,
-            "cycle_count": self.cycle_count,
-            "system_prompt": self.last_system_prompt if hasattr(self, 'last_system_prompt') else None,
-            "conversation": self.conversation_history[-1] if self.conversation_history else None,
-            "full_context": self.last_full_context if hasattr(self, 'last_full_context') else None
-        }
-        
-        # 如果是第一次寫入，創建新文件
-        mode = 'w' if not os.path.exists(HISTORY_FILE) else 'a'
-        with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
-            f.write("\n=== 新對話 ===\n")
-            json.dump(entry, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-
-    def load_history(self):
-        """載入對話歷史"""
-        self.conversation_history = []
-        if os.path.exists(HISTORY_FILE):
-            try:
-                with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    # 分割每個對話記錄
-                    conversations = content.split("=== 新對話 ===")
-                    for conv in conversations:
-                        if conv.strip():
-                            try:
-                                entry = json.loads(conv.strip())
-                                if entry.get("conversation"):
-                                    self.conversation_history.append(entry["conversation"])
-                            except json.JSONDecodeError:
-                                print(f"無法解析對話記錄: {conv[:100]}...")
-            except Exception as e:
-                print(f"載入對話歷史時發生錯誤: {e}")
+            # 簡化錯誤訊息
+            error_msg = str(e)
+            if len(error_msg) > 100:
+                error_msg = error_msg[:100] + "..."
+            
+            # 只顯示前三個表格的資訊
+            available_tables_list = [f"- {table}: {columns}" for table, columns in list(self.available_tables.items())[:3]]
+            if len(self.available_tables) > 3:
+                available_tables_list.append("...")
+            available_tables = "\n".join(available_tables_list)
+            
+            return f"SQL 執行錯誤: {error_msg}\n\n可用的表格和列（部分）：\n{available_tables}"
 
     def format_history_for_ai(self):
         """格式化對話歷史，讓AI更容易理解"""
@@ -134,23 +189,45 @@ class Agent:
         return formatted_history
 
     def read_file(self, filename):
+        """讀取文件內容，並限制輸出長度"""
         file_path = os.path.join(FILES_DIR, filename)
         if not os.path.exists(file_path):
             return f"Error: File {filename} not found"
         
+        max_total_length = 1000  # 最大輸出長度
+        
         if filename.endswith('.csv'):
             df = pd.read_csv(file_path)
-            return df.head().to_string()
+            # 只顯示前 5 行和前 5 列
+            preview_df = df.head().iloc[:, :5]
+            if df.shape[1] > 5:
+                preview_df = preview_df.assign(**{'...': ['...'] * len(preview_df)})
+            result = preview_df.to_string()
+            if len(result) > max_total_length:
+                result = result[:max_total_length] + "..."
+            return f"文件預覽 (顯示前 5 行):\n{result}"
         
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read(max_total_length)
+                if len(content) == max_total_length:
+                    content += "..."
+                return content
+        except UnicodeDecodeError:
+            return "Error: 無法讀取二進制文件"
 
     def think(self, user_input):
         self.cycle_count += 1
         
+        # 如果是第一次對話，保存初始問題
+        if self.cycle_count == 1:
+            self.initial_question = user_input
+        
         # 準備系統提示
-        system_prompt = f"""你是一個可以閱讀本地文件和執行 SQL 查詢的AI助手。
-當前是第 {self.cycle_count} 次循環。
+        system_prompt = f"""你是一個可以閱讀本地文件和執行 SQL 查詢的法律案例分析專家。請你根據用戶的問題主動查詢相關案例分析回答
+當前是第 {self.cycle_count} 次循環，你正在與自己對話進行法律分析
+
+用戶的初始問題是：{self.initial_question if hasattr(self, 'initial_question') else user_input} 請根據這個問題進行回答
 
 可用的資料表說明：
 1. judgement_guilty_analysis_grouping_20250223_180510
@@ -175,21 +252,27 @@ class Agent:
 可用的動作：
 1. 讀取文件 (使用 READ_FILE 命令)
 2. 執行 SQL 查詢 (使用 SQL 命令)
-3. 決定是否繼續分析 (使用 if_finish 標籤)
+3. 決定是否繼續分析 (使用 if_finish 標籤)，當你充分分析後，請使用 finish
 
 SQL 查詢注意事項：
 1. 不要在 SQL 語句外加大括號
 2. 確保表名完全正確
-3. 使用 LIKE 查詢時用 '%關鍵字%'
-4. 每次查詢最多顯示 5 行資料
-5. 長文字欄位會自動截斷
+3. 可嘗試檢視資料表內範例資料了解資料
+4. 使用 LIKE 查詢時用 '%關鍵字%'
+5. 每次查詢最多顯示 5 行資料
+6. 長文字欄位會自動截斷
 
-請用以下格式回應：
-<think>思考過程，包括對之前對話的理解和下一步計劃</think>
+請嚴格依照以下格式回應：
+<think summary>十字內 思考方向</think summary>
+<think>三十字內 思考過程，包括對之前對話的理解和下一步計劃</think>
 <action>READ_FILE {{filename}} 或 SQL {{query}}</action>
-<content>回應內容</content>
-<if_finish>continue 或 finish</if_finish>"""
-
+<content>回應內容，包括分析的結果</content>
+<if_finish>continue 或 finish</if_finish>
+若你認為分析完成了請使用 finish,沒有則輸入 continue
+若你決定 finish 請在 content 內總結到目前為止的發現與分析
+回應的時候請盡量引用你搜尋到的數據、具體案例與事實，增加可信度
+"""
+        
         # 保存最後的系統提示
         self.last_system_prompt = system_prompt
         

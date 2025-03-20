@@ -1,4 +1,25 @@
+# AI 和 OpenAI 相關
 openai==1.12.0
-python-dotenv==1.0.1
+
+# 數據處理和分析
 pandas==2.2.1
+numpy==1.26.4
 sqlite-utils==3.35
+
+# Web 服務器和 API
+fastapi==0.110.0
+uvicorn==0.27.1
+python-multipart==0.0.9
+websockets==12.0
+
+# 模板和格式化
+jinja2==3.1.3
+
+# 配置和環境變數
+python-dotenv==1.0.1
+
+# 數據庫整合
+supabase==2.3.4
+
+# 日誌記錄
+loguru==0.7.2
