@@ -1,2 +1,17 @@
-local_only_main.py
+# 環境變數
 .env
+.env.local
+.env.development
+
+# 資料庫
+*.db
+*.sqlite
+
+# 日誌
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
