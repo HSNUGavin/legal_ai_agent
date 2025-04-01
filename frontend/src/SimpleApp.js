@@ -1,6 +1,16 @@
 // Get React and ReactDOM from the global scope (loaded via CDN)
 const { useState, useEffect, useRef } = React;
 
+// 渲染 Markdown 內容
+const renderMarkdown = (text) => {
+    // 使用 marked.js 解析 Markdown
+    if (typeof marked !== 'undefined') {
+        return <div dangerouslySetInnerHTML={{ __html: marked.parse(text) }} />;
+    }
+    // 如果 marked 不可用，則返回純文本
+    return <div>{text}</div>;
+};
+
 function SimpleApp() {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
@@ -41,42 +51,25 @@ function SimpleApp() {
                 // 提取思考步驟
                 extractThinkingSteps(processedResponse);
                 
-                // 提取內容 - 無論是否完成都顯示當前內容
+                // 提取內容 - 只在完成時顯示最終內容
                 const contentMatch = processedResponse.match(/<content>(.*?)<\/content>/s);
                 const currentContent = contentMatch ? contentMatch[1] : processedResponse;
                 
-                // 更新消息，顯示當前的思考內容
+                // 更新消息，只在完成時顯示最終內容
                 if (decision === 'finish') {
                     // 如果完成，添加最終消息
                     setMessages(prev => {
-                        // 過濾掉之前可能添加的臨時 AI 消息
-                        const filteredPrev = prev.filter(msg => !(msg.sender === 'ai' && msg.temporary));
+                        // 過濾掉之前可能添加的臨時 AI 消息和系統消息
+                        const filteredPrev = prev.filter(msg => !(msg.sender === 'ai' && msg.temporary) && msg.sender !== 'system');
                         return [...filteredPrev, { text: currentContent, sender: 'ai' }];
                     });
                     setIsLoading(false);
                     break;
                 } else {
-                    // 如果未完成，添加臨時消息
-                    setMessages(prev => {
-                        // 過濾掉之前可能添加的臨時 AI 消息
-                        const filteredPrev = prev.filter(msg => !(msg.sender === 'ai' && msg.temporary));
-                        return [...filteredPrev, { 
-                            text: currentContent || "思考中...", 
-                            sender: 'ai', 
-                            temporary: true 
-                        }];
-                    });
-                    
                     // 檢查是否有動作需要執行
                     const actionMatch = processedResponse.match(/<action>(.*?)<\/action>/);
                     
                     if (actionMatch) {
-                        // 顯示中間步驟
-                        setMessages(prev => [...prev, { 
-                            text: `執行動作: ${actionMatch[1]}`, 
-                            sender: 'system' 
-                        }]);
-                        
                         // 繼續處理
                         const response = await fetch('http://localhost:5000/api/chat', {
                             method: 'POST',
@@ -121,6 +114,7 @@ function SimpleApp() {
         // 提取思考步驟
         const strategyMatches = response.match(/<strategy>(.*?)<\/strategy>/g) || [];
         const thinkMatches = response.match(/<think>(.*?)<\/think>/g) || [];
+        const actionMatch = response.match(/<action>(.*?)<\/action>/);
         
         const steps = [];
         const maxSteps = Math.max(strategyMatches.length, thinkMatches.length);
@@ -141,6 +135,12 @@ function SimpleApp() {
             if (Object.keys(step).length > 0) {
                 steps.push(step);
             }
+        }
+        
+        // 如果有動作標籤，添加到思考步驟中
+        if (actionMatch) {
+            const actionContent = actionMatch[1];
+            steps.push({ action: actionContent });
         }
         
         setThinkingSteps(prev => [...prev, ...steps]);
@@ -188,6 +188,7 @@ function SimpleApp() {
         <div className="app-container">
             <div className="header">
                 <h1>法律 AI 助手</h1>
+                <h2>透過 AI 搜尋資料庫內的台灣法律判決書</h2>
             </div>
             
             <button className="reset-button" onClick={handleReset}>
@@ -199,7 +200,11 @@ function SimpleApp() {
                     <div className="messages">
                         {messages.map((message, index) => (
                             <div key={index} className={`message ${message.sender}-message`}>
-                                {message.text}
+                                {message.sender === 'user' ? (
+                                    message.text
+                                ) : (
+                                    renderMarkdown(message.text)
+                                )}
                             </div>
                         ))}
                         {isLoading && (
@@ -248,6 +253,11 @@ function SimpleApp() {
                                 {step.think && (
                                     <div className="thinking-node think-node">
                                         <strong>思考:</strong> {step.think}
+                                    </div>
+                                )}
+                                {step.action && (
+                                    <div className="thinking-node action-node">
+                                        <strong>動作:</strong> {step.action}
                                     </div>
                                 )}
                             </div>

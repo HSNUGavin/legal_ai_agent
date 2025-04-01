@@ -38,6 +38,19 @@ body {
     border-bottom: 1px solid #ddd;
 }
 
+.header h1 {
+    margin-bottom: 0.5rem;
+    color: var(--primary-color);
+}
+
+.header h2 {
+    font-size: 1.2rem;
+    font-weight: normal;
+    color: var(--dark-color);
+    opacity: 0.8;
+    margin-bottom: 0.5rem;
+}
+
 .chat-container {
     display: flex;
     flex: 1;
@@ -222,4 +235,118 @@ body {
     40% { 
         transform: scale(1.0);
     }
+}
+
+/* Markdown 樣式 */
+.ai-message pre {
+    background-color: #f6f8fa;
+    border-radius: 6px;
+    padding: 16px;
+    overflow: auto;
+    margin: 10px 0;
+    border: 1px solid #ddd;
+}
+
+.ai-message code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    background-color: rgba(175, 184, 193, 0.2);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 85%;
+}
+
+.ai-message pre code {
+    background-color: transparent;
+    padding: 0;
+    border-radius: 0;
+    font-size: 100%;
+}
+
+.ai-message table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+}
+
+.ai-message th, .ai-message td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+
+.ai-message th {
+    background-color: #f6f8fa;
+    font-weight: 600;
+}
+
+.ai-message blockquote {
+    border-left: 4px solid #ddd;
+    padding-left: 16px;
+    color: #6a737d;
+    margin: 10px 0;
+}
+
+.ai-message ul, .ai-message ol {
+    padding-left: 20px;
+    margin: 10px 0;
+}
+
+.ai-message img {
+    max-width: 100%;
+    height: auto;
+    margin: 10px 0;
+}
+
+.ai-message h1, .ai-message h2, .ai-message h3, 
+.ai-message h4, .ai-message h5, .ai-message h6 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.ai-message h1 {
+    font-size: 2em;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3em;
+}
+
+.ai-message h2 {
+    font-size: 1.5em;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3em;
+}
+
+.ai-message h3 {
+    font-size: 1.25em;
+}
+
+.ai-message h4 {
+    font-size: 1em;
+}
+
+.ai-message h5 {
+    font-size: 0.875em;
+}
+
+.ai-message h6 {
+    font-size: 0.85em;
+    color: #6a737d;
+}
+
+.ai-message hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: #e1e4e8;
+    border: 0;
+}
+
+.ai-message a {
+    color: var(--secondary-color);
+    text-decoration: none;
+}
+
+.ai-message a:hover {
+    text-decoration: underline;
 }

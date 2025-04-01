@@ -2,6 +2,8 @@
 
 一個基於 Python 後端和 React 前端的法律 AI 助手系統，用於分析法律案例並提供法律建議。
 
+> [English version](./README_EN.md)
+
 ## 功能特點
 
 - 使用 OpenAI GPT-4o 模型進行法律分析
